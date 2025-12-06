@@ -19,7 +19,7 @@ if(!$phone){
 }
 
 // ======= CALLBACK URL (Render public URL) =======
-$callbackUrl = "https://your-render-app.onrender.com/callback.php";  
+$callbackUrl = "https://solutionsbackend-uv0s.onrender.com";  
 
 // 1. Generate Access Token
 $credentials = base64_encode($consumerKey . ":" . $consumerSecret);
