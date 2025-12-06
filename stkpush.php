@@ -13,13 +13,19 @@ $amount = 1550;
 // Phone number from POST request
 $phone = isset($_POST['phone']) ? $_POST['phone'] : '';
 
+// Convert phone to 2547XXXXXXXX format
+$phone = preg_replace('/[^0-9]/', '', $phone); // remove non-digits
+if (strlen($phone) == 10 && substr($phone,0,1)=="0") {
+    $phone = "254" . substr($phone,1);
+}
+
 if(!$phone){
     echo json_encode(["error" => "Phone number is required"]);
     exit;
 }
 
 // ======= CALLBACK URL (Render public URL) =======
-$callbackUrl = "https://solutionsbackend-uv0s.onrender.com";  
+$callbackUrl = "https://solutionsbackend-uv0s.onrender.com/callback.php";  
 
 // 1. Generate Access Token
 $credentials = base64_encode($consumerKey . ":" . $consumerSecret);
@@ -70,6 +76,10 @@ curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
 
 $stkResponse = curl_exec($curl);
 curl_close($curl);
+
+// Log the response
+file_put_contents("mpesa_log.txt", date("Y-m-d H:i:s") . " - STK Push Request: " . json_encode($stkData) . PHP_EOL, FILE_APPEND);
+file_put_contents("mpesa_log.txt", date("Y-m-d H:i:s") . " - STK Push Response: " . $stkResponse . PHP_EOL, FILE_APPEND);
 
 // Return response to browser
 header('Content-Type: application/json');
