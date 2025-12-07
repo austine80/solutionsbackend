@@ -1,4 +1,10 @@
 <?php
+// Custom logging function: Writes to the console (stdout) for cloud hosting
+function log_to_console($message) {
+    // We prefix the message so it's clearly identifiable in the host logs
+    echo "[" . date("Y-m-d H:i:s") . "] M-PESA LOG: " . $message . "\n";
+}
+
 // ======= ADD CORS HEADERS AT THE VERY TOP =======
 header('Access-Control-Allow-Origin: https://onlinetasks.netlify.app');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
@@ -21,8 +27,7 @@ $passkey = getenv('PASSKEY');
 
 // Validate credentials
 if (!$consumerKey || !$consumerSecret || !$shortCode || !$passkey) {
-    // Log the failure to access credentials
-    file_put_contents("mpesa_log.txt", date("Y-m-d H:i:s") . " - FATAL: Missing credentials." . PHP_EOL, FILE_APPEND);
+    log_to_console("FATAL: Missing credentials.");
     
     echo json_encode([
         "error" => "Missing required API credentials. Check server environment variables.",
@@ -34,7 +39,6 @@ if (!$consumerKey || !$consumerSecret || !$shortCode || !$passkey) {
     exit;
 }
 
-// Ensure ShortCode is treated as a string for concatenation but cast to int for API
 $shortCodeStr = (string)$shortCode;
 $amount = 1550;
 $phone = isset($_POST['phone']) ? $_POST['phone'] : '';
@@ -47,30 +51,23 @@ if (!$phone) {
 // Normalize phone number (keeping your original robust logic)
 $phone = preg_replace('/[^0-9]/', '', $phone);
 
-if (strlen($phone) == 12 && substr($phone, 0, 3) == "254") {
-    // OK
-} elseif (strlen($phone) == 10 && substr($phone, 0, 1) == "0") {
+// Phone validation logic (kept the same)
+if (strlen($phone) == 10 && substr($phone, 0, 1) == "0") {
     $phone = "254" . substr($phone, 1);
 } elseif (strlen($phone) == 9) {
     $phone = "254" . $phone;
-} else {
-    echo json_encode([
-        "error" => "Invalid phone number format",
-        "received" => $phone,
-        "expected" => "e.g., 0712345678 or 254712345678"
-    ]);
-    exit;
-}
+} 
 
 if (strlen($phone) != 12 || substr($phone, 0, 3) != "254") {
+    log_to_console("Phone Validation Error: Received " . $phone);
     echo json_encode(["error" => "Phone must start with 254 and be 12 digits"]);
     exit;
 }
 
 // Logging
-file_put_contents("mpesa_log.txt", "==================================" . PHP_EOL, FILE_APPEND);
-file_put_contents("mpesa_log.txt", date("Y-m-d H:i:s") . " - NEW STK PUSH REQUEST" . PHP_EOL, FILE_APPEND);
-file_put_contents("mpesa_log.txt", "Phone: " . $phone . ", Amount: " . $amount . PHP_EOL, FILE_APPEND);
+log_to_console("==================================");
+log_to_console("NEW STK PUSH REQUEST");
+log_to_console("Phone: " . $phone . ", Amount: " . $amount);
 
 // ✅ Callback URL (Your Render URL)
 $callbackUrl = "https://solutionsbackend-uv0s.onrender.com/callback.php";
@@ -88,28 +85,28 @@ $curlError = curl_error($curl);
 curl_close($curl);
 
 if ($curlError) {
-    file_put_contents("mpesa_log.txt", "Token cURL Error: " . $curlError . PHP_EOL, FILE_APPEND);
+    log_to_console("Token cURL Error: " . $curlError);
     echo json_encode(["error" => "Token request failed", "details" => $curlError]);
     exit;
 }
 
 $response = json_decode($tokenResponse, true);
 if (!isset($response['access_token'])) {
-    file_put_contents("mpesa_log.txt", "Token Response FAILED. Response: " . $tokenResponse . PHP_EOL, FILE_APPEND);
+    log_to_console("Token Response FAILED. Response: " . $tokenResponse);
     echo json_encode(["error" => "Failed to get access token", "response" => $response]);
     exit;
 }
 
 $access_token = $response['access_token'];
-file_put_contents("mpesa_log.txt", "Access Token: " . substr($access_token, 0, 20) . "..." . PHP_EOL, FILE_APPEND);
+log_to_console("Access Token: " . substr($access_token, 0, 20) . "...");
 
-// 2. Prepare STK Push (Till - CustomerBuyGoodsOnline)
+// 2. Prepare STK Push
 $timestamp = date("YmdHis");
 $securityString = $shortCodeStr . $passkey . $timestamp;
 $password = base64_encode($securityString);
 
-file_put_contents("mpesa_log.txt", "Security String: " . $securityString . PHP_EOL, FILE_APPEND);
-file_put_contents("mpesa_log.txt", "Base64 Password: " . $password . PHP_EOL, FILE_APPEND);
+log_to_console("Security String (for debugging Passkey/Timestamp issues): " . $securityString);
+log_to_console("Base64 Password: " . $password);
 
 $data = [
     "BusinessShortCode" => (int)$shortCode,
@@ -142,8 +139,8 @@ $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
 $stkError = curl_error($curl);
 curl_close($curl);
 
-file_put_contents("mpesa_log.txt", "STK HTTP Code: " . $httpCode . PHP_EOL, FILE_APPEND);
-file_put_contents("mpesa_log.txt", "STK Raw Response: " . $stkResponse . PHP_EOL, FILE_APPEND);
+log_to_console("STK HTTP Code: " . $httpCode);
+log_to_console("STK Raw Response: " . $stkResponse);
 
 // Always return JSON
 $responseData = json_decode($stkResponse, true);
