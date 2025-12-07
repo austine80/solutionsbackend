@@ -21,8 +21,11 @@ $passkey = getenv('PASSKEY');
 
 // Validate credentials
 if (!$consumerKey || !$consumerSecret || !$shortCode || !$passkey) {
+    // Log the failure to access credentials
+    file_put_contents("mpesa_log.txt", date("Y-m-d H:i:s") . " - FATAL: Missing credentials." . PHP_EOL, FILE_APPEND);
+    
     echo json_encode([
-        "error" => "Missing credentials. Please check environment variables.",
+        "error" => "Missing required API credentials. Check server environment variables.",
         "has_consumer_key" => !empty($consumerKey),
         "has_consumer_secret" => !empty($consumerSecret),
         "has_shortcode" => !empty($shortCode),
@@ -31,6 +34,8 @@ if (!$consumerKey || !$consumerSecret || !$shortCode || !$passkey) {
     exit;
 }
 
+// Ensure ShortCode is treated as a string for concatenation but cast to int for API
+$shortCodeStr = (string)$shortCode;
 $amount = 1550;
 $phone = isset($_POST['phone']) ? $_POST['phone'] : '';
 
@@ -39,7 +44,7 @@ if (!$phone) {
     exit;
 }
 
-// Normalize phone number
+// Normalize phone number (keeping your original robust logic)
 $phone = preg_replace('/[^0-9]/', '', $phone);
 
 if (strlen($phone) == 12 && substr($phone, 0, 3) == "254") {
@@ -64,10 +69,10 @@ if (strlen($phone) != 12 || substr($phone, 0, 3) != "254") {
 
 // Logging
 file_put_contents("mpesa_log.txt", "==================================" . PHP_EOL, FILE_APPEND);
-file_put_contents("mpesa_log.txt", date("Y-m-d H:i:s") . " - NEW REQUEST" . PHP_EOL, FILE_APPEND);
+file_put_contents("mpesa_log.txt", date("Y-m-d H:i:s") . " - NEW STK PUSH REQUEST" . PHP_EOL, FILE_APPEND);
 file_put_contents("mpesa_log.txt", "Phone: " . $phone . ", Amount: " . $amount . PHP_EOL, FILE_APPEND);
 
-// ✅ CORRECTED: No trailing space!
+// ✅ Callback URL (Your Render URL)
 $callbackUrl = "https://solutionsbackend-uv0s.onrender.com/callback.php";
 
 // 1. Get Access Token
@@ -90,7 +95,7 @@ if ($curlError) {
 
 $response = json_decode($tokenResponse, true);
 if (!isset($response['access_token'])) {
-    file_put_contents("mpesa_log.txt", "Token Response: " . $tokenResponse . PHP_EOL, FILE_APPEND);
+    file_put_contents("mpesa_log.txt", "Token Response FAILED. Response: " . $tokenResponse . PHP_EOL, FILE_APPEND);
     echo json_encode(["error" => "Failed to get access token", "response" => $response]);
     exit;
 }
@@ -100,7 +105,11 @@ file_put_contents("mpesa_log.txt", "Access Token: " . substr($access_token, 0, 2
 
 // 2. Prepare STK Push (Till - CustomerBuyGoodsOnline)
 $timestamp = date("YmdHis");
-$password = base64_encode($shortCode . $passkey . $timestamp);
+$securityString = $shortCodeStr . $passkey . $timestamp;
+$password = base64_encode($securityString);
+
+file_put_contents("mpesa_log.txt", "Security String: " . $securityString . PHP_EOL, FILE_APPEND);
+file_put_contents("mpesa_log.txt", "Base64 Password: " . $password . PHP_EOL, FILE_APPEND);
 
 $data = [
     "BusinessShortCode" => (int)$shortCode,
