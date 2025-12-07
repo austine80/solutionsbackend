@@ -1,10 +1,22 @@
 <?php
+// ======= ADD CORS HEADERS AT THE VERY TOP =======
+header('Access-Control-Allow-Origin: https://onlinetasks.netlify.app');
+header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Content-Type: application/json');
+
+// Handle preflight OPTIONS request
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
 date_default_timezone_set('Africa/Nairobi');
 
 // ======= READ CREDENTIALS FROM ENVIRONMENT VARIABLES =======
 $consumerKey = getenv('CONSUMER_KEY');
 $consumerSecret = getenv('CONSUMER_SECRET');
-$shortCode = getenv('SHORTCODE'); // This is your Till Number
+$shortCode = getenv('SHORTCODE');
 $passkey = getenv('PASSKEY');
 
 // Amount to charge
@@ -14,7 +26,7 @@ $amount = 1550;
 $phone = isset($_POST['phone']) ? $_POST['phone'] : '';
 
 // Convert phone to 2547XXXXXXXX format
-$phone = preg_replace('/[^0-9]/', '', $phone); // remove non-digits
+$phone = preg_replace('/[^0-9]/', '', $phone);
 if (strlen($phone) == 10 && substr($phone,0,1)=="0") {
     $phone = "254" . substr($phone,1);
 }
@@ -24,7 +36,7 @@ if(!$phone){
     exit;
 }
 
-// ======= CALLBACK URL (Render public URL) =======
+// ======= CALLBACK URL =======
 $callbackUrl = "https://solutionsbackend-uv0s.onrender.com/callback.php";  
 
 // 1. Generate Access Token
@@ -45,21 +57,21 @@ if(!isset($response->access_token)){
 
 $access_token = $response->access_token;
 
-// 2. Prepare STK Push request for Till Number (BuyGoods)
+// 2. Prepare STK Push request
 $timestamp = date("YmdHis");
 $password = base64_encode($shortCode . $passkey . $timestamp);
 
 $data = [
-    "BusinessShortCode" => $shortCode,            // Your Till Number
+    "BusinessShortCode" => $shortCode,
     "Password" => $password,
     "Timestamp" => $timestamp,
-    "TransactionType" => "CustomerBuyGoodsOnline", // Important for Till Number
+    "TransactionType" => "CustomerBuyGoodsOnline",
     "Amount" => $amount,
-    "PartyA" => $phone,                            // Customer phone
-    "PartyB" => $shortCode,                        // Your Till Number
+    "PartyA" => $phone,
+    "PartyB" => $shortCode,
     "PhoneNumber" => $phone,
     "CallBackURL" => $callbackUrl,
-    "AccountReference" => "Activation",           // Optional, can use user ID
+    "AccountReference" => "Activation",
     "TransactionDesc" => "Account Activation"
 ];
 
@@ -77,11 +89,9 @@ curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
 $stkResponse = curl_exec($curl);
 curl_close($curl);
 
-// Log the response (FIXED: changed $stkData to $data)
+// Log the response
 file_put_contents("mpesa_log.txt", date("Y-m-d H:i:s") . " - STK Push Request: " . json_encode($data) . PHP_EOL, FILE_APPEND);
 file_put_contents("mpesa_log.txt", date("Y-m-d H:i:s") . " - STK Push Response: " . $stkResponse . PHP_EOL, FILE_APPEND);
 
-// Return response to browser
-header('Content-Type: application/json');
 echo $stkResponse;
 ?>
