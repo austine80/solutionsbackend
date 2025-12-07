@@ -1,8 +1,8 @@
 <?php
-// Custom logging function: Writes to the console (stdout) for cloud hosting
+// Custom logging function: Writes ONLY to the server logs (stderr/stdout) 
+// without contaminating the HTTP response stream.
 function log_to_console($message) {
-    // We prefix the message so it's clearly identifiable in the host logs
-    echo "[" . date("Y-m-d H:i:s") . "] M-PESA LOG: " . $message . "\n";
+    error_log("[M-PESA DEBUG] " . $message);
 }
 
 // Ensure clean JSON response
@@ -51,7 +51,7 @@ else {
     log_to_console("   • CheckoutRequestID: " . $checkoutRequestId);
 
     if ($resultCode == 0) {
-        // SUCCESS
+        // SUCCESS: Extract transaction metadata
         log_to_console("✅ PAYMENT SUCCESSFUL - Ready for DB Update");
         
         if (isset($callback['CallbackMetadata']['Item'])) {
@@ -73,7 +73,7 @@ else {
             }
         }
     } else {
-        // FAILURE or CANCELLED - This will show the instant failure reason
+        // FAILURE or CANCELLED - This is your instant failure reason
         log_to_console("❌ PAYMENT FAILED/CANCELLED. Check ResultCode ({$resultCode}) for reason.");
     }
 }

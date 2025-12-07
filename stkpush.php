@@ -1,8 +1,8 @@
 <?php
-// Custom logging function: Writes to the console (stdout) for cloud hosting
+// Custom logging function: Writes ONLY to the server logs (stderr/stdout) 
+// without contaminating the HTTP response stream.
 function log_to_console($message) {
-    // We prefix the message so it's clearly identifiable in the host logs
-    echo "[" . date("Y-m-d H:i:s") . "] M-PESA LOG: " . $message . "\n";
+    error_log("[M-PESA DEBUG] " . $message);
 }
 
 // ======= ADD CORS HEADERS AT THE VERY TOP =======
@@ -48,7 +48,7 @@ if (!$phone) {
     exit;
 }
 
-// Normalize phone number (keeping your original robust logic)
+// Normalize phone number 
 $phone = preg_replace('/[^0-9]/', '', $phone);
 
 // Phone validation logic (kept the same)
@@ -105,7 +105,7 @@ $timestamp = date("YmdHis");
 $securityString = $shortCodeStr . $passkey . $timestamp;
 $password = base64_encode($securityString);
 
-log_to_console("Security String (for debugging Passkey/Timestamp issues): " . $securityString);
+log_to_console("Security String: " . $securityString);
 log_to_console("Base64 Password: " . $password);
 
 $data = [
