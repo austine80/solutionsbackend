@@ -1,70 +1,86 @@
 <?php
+// Ensure clean JSON response
 header("Content-Type: application/json");
 
-// Get the JSON payload from Safaricom
-$mpesaResponse = file_get_contents("php://input");
+// Read raw POST data from Safaricom
+$rawInput = file_get_contents("php://input");
 
-// Log with clear separation
-file_put_contents("mpesa_log.txt", "\n========================================" . PHP_EOL, FILE_APPEND);
-file_put_contents("mpesa_log.txt", date("Y-m-d H:i:s") . " - CALLBACK RECEIVED" . PHP_EOL, FILE_APPEND);
-file_put_contents("mpesa_log.txt", "Raw Response: " . $mpesaResponse . PHP_EOL, FILE_APPEND);
+// Logging: Start of callback
+file_put_contents("mpesa_log.txt", "\n" . str_repeat("=", 50) . "\n", FILE_APPEND);
+file_put_contents("mpesa_log.txt", date("Y-m-d H:i:s") . " - M-PESA CALLBACK RECEIVED\n", FILE_APPEND);
+file_put_contents("mpesa_log.txt", "Raw Input: " . $rawInput . "\n", FILE_APPEND);
 
-// Decode JSON
-$data = json_decode($mpesaResponse, true);
+// Decode JSON safely
+$data = json_decode($rawInput, true);
 
-if ($data) {
-    // Log the full structure
-    file_put_contents("mpesa_log.txt", "Decoded Data: " . json_encode($data, JSON_PRETTY_PRINT) . PHP_EOL, FILE_APPEND);
-    
-    // Check if callback exists
-    if (isset($data['Body']['stkCallback'])) {
-        $callback = $data['Body']['stkCallback'];
+// Initialize default response
+$response = [
+    "ResultCode" => 0,
+    "ResultDesc" => "Accepted"
+];
+
+if (json_last_error() !== JSON_ERROR_NONE) {
+    // Log JSON parse error
+    file_put_contents("mpesa_log.txt", "ERROR: Failed to decode JSON\n", FILE_APPEND);
+    $response["ResultCode"] = 1;
+    $response["ResultDesc"] = "Invalid JSON";
+} 
+elseif (!isset($data['Body']['stkCallback'])) {
+    // Unexpected structure
+    file_put_contents("mpesa_log.txt", "ERROR: Invalid callback structure\n", FILE_APPEND);
+    file_put_contents("mpesa_log.txt", "Decoded Data: " . json_encode($data, JSON_PRETTY_PRINT) . "\n", FILE_APPEND);
+    $response["ResultCode"] = 1;
+    $response["ResultDesc"] = "Invalid callback format";
+} 
+else {
+    $callback = $data['Body']['stkCallback'];
+    $resultCode = $callback['ResultCode'] ?? null;
+    $resultDesc = $callback['ResultDesc'] ?? 'No description';
+    $merchantRequestId = $callback['MerchantRequestID'] ?? 'N/A';
+    $checkoutRequestId = $callback['CheckoutRequestID'] ?? 'N/A';
+
+    // Log key details
+    file_put_contents("mpesa_log.txt", "ResultCode: " . $resultCode . "\n", FILE_APPEND);
+    file_put_contents("mpesa_log.txt", "ResultDesc: " . $resultDesc . "\n", FILE_APPEND);
+    file_put_contents("mpesa_log.txt", "MerchantRequestID: " . $merchantRequestId . "\n", FILE_APPEND);
+    file_put_contents("mpesa_log.txt", "CheckoutRequestID: " . $checkoutRequestId . "\n", FILE_APPEND);
+
+    if ($resultCode == 0) {
+        // SUCCESS: Extract transaction metadata
+        file_put_contents("mpesa_log.txt", "✅ PAYMENT SUCCESSFUL\n", FILE_APPEND);
         
-        file_put_contents("mpesa_log.txt", "Result Code: " . ($callback['ResultCode'] ?? 'N/A') . PHP_EOL, FILE_APPEND);
-        file_put_contents("mpesa_log.txt", "Result Desc: " . ($callback['ResultDesc'] ?? 'N/A') . PHP_EOL, FILE_APPEND);
-        file_put_contents("mpesa_log.txt", "Merchant Request ID: " . ($callback['MerchantRequestID'] ?? 'N/A') . PHP_EOL, FILE_APPEND);
-        file_put_contents("mpesa_log.txt", "Checkout Request ID: " . ($callback['CheckoutRequestID'] ?? 'N/A') . PHP_EOL, FILE_APPEND);
-        
-        // Process based on result code
-        if ($callback['ResultCode'] == 0) {
-            file_put_contents("mpesa_log.txt", "✓ PAYMENT SUCCESSFUL" . PHP_EOL, FILE_APPEND);
-            
-            // Log transaction details
-            if (isset($callback['CallbackMetadata']['Item'])) {
-                file_put_contents("mpesa_log.txt", "Transaction Details:" . PHP_EOL, FILE_APPEND);
-                foreach ($callback['CallbackMetadata']['Item'] as $item) {
-                    file_put_contents("mpesa_log.txt", "  - " . $item['Name'] . ": " . $item['Value'] . PHP_EOL, FILE_APPEND);
-                }
+        if (isset($callback['CallbackMetadata']['Item'])) {
+            $metadata = $callback['CallbackMetadata']['Item'];
+            $details = [];
+            foreach ($metadata as $item) {
+                $name = $item['Name'] ?? 'Unknown';
+                $value = $item['Value'] ?? 'N/A';
+                $details[$name] = $value;
+                file_put_contents("mpesa_log.txt", "  • {$name}: {$value}\n", FILE_APPEND);
             }
-            
-            // HERE: Add your database update logic
-            // Example:
-            // $phone = $callback['CallbackMetadata']['Item'][4]['Value'] ?? '';
-            // $amount = $callback['CallbackMetadata']['Item'][0]['Value'] ?? 0;
-            // $mpesaReceiptNumber = $callback['CallbackMetadata']['Item'][1]['Value'] ?? '';
-            // updateUserSubscription($phone, $amount, $mpesaReceiptNumber);
-            
-        } else {
-            // Payment failed or cancelled
-            file_put_contents("mpesa_log.txt", "✗ PAYMENT FAILED/CANCELLED" . PHP_EOL, FILE_APPEND);
-            file_put_contents("mpesa_log.txt", "Reason: " . ($callback['ResultDesc'] ?? 'Unknown') . PHP_EOL, FILE_APPEND);
-            
-            // Common result codes:
-            // 1032 - Request cancelled by user
-            // 1037 - Timeout (user didn't enter PIN)
-            // 2001 - Invalid initiator information
-            // 1 - Insufficient balance
+
+            // 🔑 Example: Get phone number and M-Pesa receipt
+            // Format: Item[4] is usually PhoneNumber, Item[1] is MpesaReceiptNumber
+            $phone = $details['PhoneNumber'] ?? null;
+            $receipt = $details['MpesaReceiptNumber'] ?? null;
+            $amount = $details['Amount'] ?? null;
+
+            if ($phone && $receipt && $amount) {
+                // ✅ TODO: Update user's account on OnlineTasks (e.g., activate subscription)
+                // Example: activateUserFromPayment($phone, $amount, $receipt);
+                file_put_contents("mpesa_log.txt", "🟢 Ready to activate user: {$phone}\n", FILE_APPEND);
+            }
         }
+    } else {
+        // FAILURE or CANCELLED
+        file_put_contents("mpesa_log.txt", "❌ PAYMENT FAILED OR CANCELLED\n", FILE_APPEND);
+        // Common codes: 1032 (cancelled), 1037 (timeout), 1 (insufficient funds)
     }
-} else {
-    file_put_contents("mpesa_log.txt", "ERROR: Could not decode JSON" . PHP_EOL, FILE_APPEND);
 }
 
-file_put_contents("mpesa_log.txt", "========================================\n" . PHP_EOL, FILE_APPEND);
+// Always respond promptly to Safaricom (within 5 seconds)
+file_put_contents("mpesa_log.txt", "Sending Response: " . json_encode($response) . "\n", FILE_APPEND);
+file_put_contents("mpesa_log.txt", str_repeat("=", 50) . "\n\n", FILE_APPEND);
 
-// Respond to Safaricom
-echo json_encode([
-    "ResultCode" => 0,
-    "ResultDesc" => "Callback received successfully"
-]);
+echo json_encode($response);
 ?>
