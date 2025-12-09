@@ -23,10 +23,11 @@ date_default_timezone_set('Africa/Nairobi');
 $consumerKey = getenv('CONSUMER_KEY');
 $consumerSecret = getenv('CONSUMER_SECRET');
 $shortCode = getenv('SHORTCODE'); // Your Till Number
+$tillnumber = getenv('TILLNUMBER');
 $passkey = getenv('PASSKEY');
 
 // Validate credentials
-if (!$consumerKey || !$consumerSecret || !$shortCode || !$passkey) {
+if (!$consumerKey || !$consumerSecret || !$shortCode || !$tillnumber || !$passkey) {
     log_to_console("FATAL: Missing credentials.");
     
     echo json_encode([
@@ -34,6 +35,7 @@ if (!$consumerKey || !$consumerSecret || !$shortCode || !$passkey) {
         "has_consumer_key" => !empty($consumerKey),
         "has_consumer_secret" => !empty($consumerSecret),
         "has_shortcode" => !empty($shortCode),
+        "has_tillnumber" => !empty($tillnumber),
         "has_passkey" => !empty($passkey)
     ]);
     exit;
@@ -115,7 +117,7 @@ $data = [
     "TransactionType" => "CustomerBuyGoodsOnline",
     "Amount" => (int)$amount,
     "PartyA" => $phone,
-    "PartyB" => 5712414,
+    "PartyB" => $tillnumber,
     "PhoneNumber" => $phone,
     "CallBackURL" => $callbackUrl,
     "AccountReference" => "Activation",
