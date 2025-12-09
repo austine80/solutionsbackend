@@ -1,17 +1,16 @@
 <?php
-// Custom logging function: Writes ONLY to the server logs (stderr/stdout) 
-// without contaminating the HTTP response stream.
+// Custom logging function
 function log_to_console($message) {
     error_log("[M-PESA DEBUG] " . $message);
 }
 
-// ======= ADD CORS HEADERS AT THE VERY TOP =======
+// ===== CORS Headers (MUST be first) =====
 header('Access-Control-Allow-Origin: https://onlinetasks.netlify.app');
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 header('Content-Type: application/json');
 
-// Handle preflight OPTIONS request
+// Handle preflight
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
@@ -19,136 +18,128 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 date_default_timezone_set('Africa/Nairobi');
 
-// ======= READ CREDENTIALS FROM ENVIRONMENT VARIABLES =======
+// ===== Load credentials from environment =====
 $consumerKey = getenv('CONSUMER_KEY');
 $consumerSecret = getenv('CONSUMER_SECRET');
-$shortCode = getenv('SHORTCODE'); // Your Till Number
+$shortCode = getenv('SHORTCODE');
 $tillnumber = getenv('TILLNUMBER');
 $passkey = getenv('PASSKEY');
 
-// Validate credentials
 if (!$consumerKey || !$consumerSecret || !$shortCode || !$tillnumber || !$passkey) {
-    log_to_console("FATAL: Missing credentials.");
-    
+    log_to_console("FATAL: Missing environment variables.");
     echo json_encode([
-        "error" => "Missing required API credentials. Check server environment variables.",
-        "has_consumer_key" => !empty($consumerKey),
-        "has_consumer_secret" => !empty($consumerSecret),
-        "has_shortcode" => !empty($shortCode),
-        "has_tillnumber" => !empty($tillnumber),
-        "has_passkey" => !empty($passkey)
+        "error" => "Server misconfigured — missing M-Pesa credentials."
     ]);
     exit;
 }
 
-$shortCodeStr = (string)$shortCode;
-$amount = 1550;
-$phone = isset($_POST['phone']) ? $_POST['phone'] : '';
-
+// ===== Validate input =====
+$phone = $_POST['phone'] ?? '';
 if (!$phone) {
     echo json_encode(["error" => "Phone number is required"]);
     exit;
 }
 
-// Normalize phone number 
+// Normalize phone
 $phone = preg_replace('/[^0-9]/', '', $phone);
-
-// Phone validation logic (kept the same)
 if (strlen($phone) == 10 && substr($phone, 0, 1) == "0") {
     $phone = "254" . substr($phone, 1);
 } elseif (strlen($phone) == 9) {
     $phone = "254" . $phone;
-} 
-
+}
 if (strlen($phone) != 12 || substr($phone, 0, 3) != "254") {
-    log_to_console("Phone Validation Error: Received " . $phone);
-    echo json_encode(["error" => "Phone must start with 254 and be 12 digits"]);
+    echo json_encode(["error" => "Invalid phone format. Use 2547XXXXXXXX"]);
     exit;
 }
 
-// Logging
-log_to_console("==================================");
-log_to_console("NEW STK PUSH REQUEST");
-log_to_console("Phone: " . $phone . ", Amount: " . $amount);
+// ===== Generate transaction ID & save =====
+$txn_id = md5($phone . time());
+$amount = 1550;
 
-// ✅ Callback URL (Your Render URL)
+// Ensure directory exists
+if (!is_dir('transactions')) {
+    mkdir('transactions', 0777, true);
+}
+
+// Save pending transaction
+file_put_contents("transactions/{$txn_id}.json", json_encode([
+    'phone' => $phone,
+    'amount' => $amount,
+    'status' => 'pending',
+    'created_at' => time()
+]));
+
+log_to_console("New STK Push: Phone={$phone}, TxnID={$txn_id}");
+
+// ===== Callback URL (NO TRAILING SPACE!) =====
 $callbackUrl = "https://solutionsbackend-uv0s.onrender.com/callback.php";
 
-// 1. Get Access Token
+// ===== Step 1: Get Access Token =====
 $credentials = base64_encode($consumerKey . ":" . $consumerSecret);
 $curl = curl_init();
-curl_setopt($curl, CURLOPT_URL, "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials");
-curl_setopt($curl, CURLOPT_HTTPHEADER, ["Authorization: Basic " . $credentials]);
-curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+curl_setopt_array($curl, [
+    CURLOPT_URL => "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+    CURLOPT_HTTPHEADER => ["Authorization: Basic " . $credentials],
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_SSL_VERIFYPEER => true
+]);
 
 $tokenResponse = curl_exec($curl);
-$curlError = curl_error($curl);
 curl_close($curl);
-
-if ($curlError) {
-    log_to_console("Token cURL Error: " . $curlError);
-    echo json_encode(["error" => "Token request failed", "details" => $curlError]);
-    exit;
-}
 
 $response = json_decode($tokenResponse, true);
 if (!isset($response['access_token'])) {
-    log_to_console("Token Response FAILED. Response: " . $tokenResponse);
-    echo json_encode(["error" => "Failed to get access token", "response" => $response]);
+    log_to_console("Token error: " . $tokenResponse);
+    echo json_encode(["error" => "Failed to authenticate with M-Pesa"]);
     exit;
 }
-
 $access_token = $response['access_token'];
-log_to_console("Access Token: " . substr($access_token, 0, 20) . "...");
 
-// 2. Prepare STK Push
+// ===== Step 2: Prepare STK Push =====
 $timestamp = date("YmdHis");
-$securityString = $shortCodeStr . $passkey . $timestamp;
-$password = base64_encode($securityString);
-
-log_to_console("Security String: " . $securityString);
-log_to_console("Base64 Password: " . $password);
+$password = base64_encode($shortCode . $passkey . $timestamp);
 
 $data = [
     "BusinessShortCode" => (int)$shortCode,
     "Password" => $password,
     "Timestamp" => $timestamp,
     "TransactionType" => "CustomerBuyGoodsOnline",
-    "Amount" => (int)$amount,
+    "Amount" => $amount,
     "PartyA" => $phone,
-    "PartyB" => $tillnumber,
+    "PartyB" => (int)$tillnumber,
     "PhoneNumber" => $phone,
     "CallBackURL" => $callbackUrl,
     "AccountReference" => "Activation",
-    "TransactionDesc" => "Account Activation"
+    "TransactionDesc" => "Account activation fee"
 ];
 
-// 3. Send STK Push
+// ===== Step 3: Send STK Push =====
 $curl = curl_init();
-curl_setopt($curl, CURLOPT_URL, "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest");
-curl_setopt($curl, CURLOPT_HTTPHEADER, [
-    "Authorization: Bearer " . $access_token,
-    "Content-Type: application/json"
+curl_setopt_array($curl, [
+    CURLOPT_URL => "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
+    CURLOPT_HTTPHEADER => [
+        "Authorization: Bearer " . $access_token,
+        "Content-Type: application/json"
+    ],
+    CURLOPT_POST => true,
+    CURLOPT_POSTFIELDS => json_encode($data),
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_SSL_VERIFYPEER => true
 ]);
-curl_setopt($curl, CURLOPT_POST, true);
-curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($data));
-curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
 
 $stkResponse = curl_exec($curl);
 $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-$stkError = curl_error($curl);
 curl_close($curl);
 
-log_to_console("STK HTTP Code: " . $httpCode);
-log_to_console("STK Raw Response: " . $stkResponse);
+log_to_console("STK Response (HTTP {$httpCode}): " . $stkResponse);
 
-// Always return JSON
-$responseData = json_decode($stkResponse, true);
+// ===== Always return JSON =====
+$result = json_decode($stkResponse, true);
 if (json_last_error() !== JSON_ERROR_NONE) {
-    // Safaricom sometimes returns plain text on error
-    $responseData = ["error" => "Invalid response", "raw" => $stkResponse];
+    $result = ["error" => "Invalid M-Pesa response", "raw" => $stkResponse];
 }
-echo json_encode($responseData);
+
+// Include txn_id in response for frontend polling
+$result['txn_id'] = $txn_id;
+echo json_encode($result);
 ?>
