@@ -54,7 +54,7 @@ if (strlen($phone) != 12 || substr($phone, 0, 3) != "254") {
 
 // ===== Generate transaction ID & save =====
 $txn_id = md5($phone . time());
-$amount = 1550;
+$amount = 599; // Fixed amount for activation
 
 // Ensure directory exists
 if (!is_dir('transactions')) {
